@@ -1,84 +1,143 @@
 package ledis
 
 import (
+	"errors"
 	"github.com/siddontang/ledisdb/store"
 	"sync"
 )
 
-type tx struct {
-	m sync.Mutex
+var (
+	ErrNestTx = errors.New("nest transaction not supported")
+	ErrTxDone = errors.New("Transaction has already been committed or rolled back")
+)
 
-	l  *Ledis
-	wb store.WriteBatch
+type batch struct {
+	store.WriteBatch
 
-	binlog *BinLog
-	batch  [][]byte
+	sync.Locker
 }
 
-func newTx(l *Ledis) *tx {
-	t := new(tx)
-
-	t.l = l
-	t.wb = l.ldb.NewWriteBatch()
-
-	t.batch = make([][]byte, 0, 4)
-	t.binlog = l.binlog
-	return t
+type dbBatchLocker struct {
+	m      sync.Mutex
+	dbLock *sync.RWMutex
 }
 
-func (t *tx) Close() {
-	t.wb = nil
+type dbTxLocker struct {
 }
 
-func (t *tx) Put(key []byte, value []byte) {
-	t.wb.Put(key, value)
+func (l *dbTxLocker) Lock() {
 
-	if t.binlog != nil {
-		buf := encodeBinLogPut(key, value)
-		t.batch = append(t.batch, buf)
+}
+
+func (l *dbTxLocker) Unlock() {
+
+}
+
+func (l *dbBatchLocker) Lock() {
+	l.dbLock.RLock()
+	l.m.Lock()
+}
+
+func (l *dbBatchLocker) Unlock() {
+	l.m.Unlock()
+	l.dbLock.RUnlock()
+}
+
+func (db *DB) newBatch() *batch {
+	b := new(batch)
+
+	b.WriteBatch = db.bucket.NewWriteBatch()
+	b.Locker = &dbBatchLocker{dbLock: &db.dbLock}
+
+	return b
+}
+
+func (b *batch) Lock() {
+	b.Locker.Lock()
+}
+
+func (b *batch) Unlock() {
+	b.Rollback()
+	b.Locker.Unlock()
+}
+
+type Tx struct {
+	*DB
+
+	m *sync.RWMutex
+
+	tx *store.Tx
+}
+
+func (db *DB) IsInTransaction() bool {
+	return db.isTx
+}
+
+// Begin a transaction, it will block all other write operations before calling Commit or Rollback.
+// You must be very careful to prevent long-time transaction.
+func (db *DB) Begin() (*Tx, error) {
+	if db.isTx {
+		return nil, ErrNestTx
 	}
-}
 
-func (t *tx) Delete(key []byte) {
-	t.wb.Delete(key)
+	tx := new(Tx)
+	tx.m = &db.dbLock
 
-	if t.binlog != nil {
-		buf := encodeBinLogDelete(key)
-		t.batch = append(t.batch, buf)
-	}
-}
+	tx.m.Lock()
 
-func (t *tx) Lock() {
-	t.m.Lock()
-}
+	d := new(DB)
 
-func (t *tx) Unlock() {
-	t.batch = t.batch[0:0]
-	t.wb.Rollback()
-	t.m.Unlock()
-}
+	d.l = db.l
 
-func (t *tx) Commit() error {
+	d.sdb = db.sdb
+
 	var err error
-	if t.binlog != nil {
-		t.l.Lock()
-		err = t.wb.Commit()
-		if err != nil {
-			t.l.Unlock()
-			return err
-		}
-
-		err = t.binlog.Log(t.batch...)
-
-		t.l.Unlock()
-	} else {
-		t.l.Lock()
-		err = t.wb.Commit()
-		t.l.Unlock()
+	tx.tx, err = db.sdb.Begin()
+	if err != nil {
+		return nil, err
 	}
+
+	d.bucket = tx.tx
+
+	d.isTx = true
+
+	d.index = db.index
+
+	b := new(batch)
+	b.WriteBatch = db.bucket.NewWriteBatch()
+	b.Locker = &dbTxLocker{}
+	d.kvBatch = b
+	d.listBatch = b
+	d.hashBatch = b
+	d.zsetBatch = b
+	d.binBatch = b
+
+	tx.DB = d
+	return tx, nil
+}
+
+func (tx *Tx) Commit() error {
+	if tx.tx == nil {
+		return ErrTxDone
+	}
+
+	err := tx.tx.Commit()
+	tx.tx = nil
+
+	tx.m.Unlock()
+	tx.DB = nil
 	return err
 }
 
-func (t *tx) Rollback() {
-	t.wb.Rollback()
+func (tx *Tx) Rollback() error {
+	if tx.tx == nil {
+		return ErrTxDone
+	}
+
+	err := tx.tx.Rollback()
+	tx.tx = nil
+
+	tx.m.Unlock()
+	tx.DB = nil
+	return err
 }

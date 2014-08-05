@@ -192,7 +192,7 @@ func (db *DB) zDecodeScoreKey(ek []byte) (key []byte, member []byte, score int64
 	return
 }
 
-func (db *DB) zSetItem(t *tx, key []byte, score int64, member []byte) (int64, error) {
+func (db *DB) zSetItem(t *batch, key []byte, score int64, member []byte) (int64, error) {
 	if score <= MinScore || score >= MaxScore {
 		return 0, errScoreOverflow
 	}
@@ -200,7 +200,7 @@ func (db *DB) zSetItem(t *tx, key []byte, score int64, member []byte) (int64, er
 	var exists int64 = 0
 	ek := db.zEncodeSetKey(key, member)
 
-	if v, err := db.db.Get(ek); err != nil {
+	if v, err := db.bucket.Get(ek); err != nil {
 		return 0, err
 	} else if v != nil {
 		exists = 1
@@ -221,9 +221,9 @@ func (db *DB) zSetItem(t *tx, key []byte, score int64, member []byte) (int64, er
 	return exists, nil
 }
 
-func (db *DB) zDelItem(t *tx, key []byte, member []byte, skipDelScore bool) (int64, error) {
+func (db *DB) zDelItem(t *batch, key []byte, member []byte, skipDelScore bool) (int64, error) {
 	ek := db.zEncodeSetKey(key, member)
-	if v, err := db.db.Get(ek); err != nil {
+	if v, err := db.bucket.Get(ek); err != nil {
 		return 0, err
 	} else if v == nil {
 		//not exists
@@ -246,14 +246,14 @@ func (db *DB) zDelItem(t *tx, key []byte, member []byte, skipDelScore bool) (int
 	return 1, nil
 }
 
-func (db *DB) zDelete(t *tx, key []byte) int64 {
+func (db *DB) zDelete(t *batch, key []byte) int64 {
 	delMembCnt, _ := db.zRemRange(t, key, MinScore, MaxScore, 0, -1)
 	//	todo : log err
 	return delMembCnt
 }
 
 func (db *DB) zExpireAt(key []byte, when int64) (int64, error) {
-	t := db.zsetTx
+	t := db.zsetBatch
 	t.Lock()
 	defer t.Unlock()
 
@@ -273,7 +273,7 @@ func (db *DB) ZAdd(key []byte, args ...ScorePair) (int64, error) {
 		return 0, nil
 	}
 
-	t := db.zsetTx
+	t := db.zsetBatch
 	t.Lock()
 	defer t.Unlock()
 
@@ -303,10 +303,10 @@ func (db *DB) ZAdd(key []byte, args ...ScorePair) (int64, error) {
 	return num, err
 }
 
-func (db *DB) zIncrSize(t *tx, key []byte, delta int64) (int64, error) {
+func (db *DB) zIncrSize(t *batch, key []byte, delta int64) (int64, error) {
 	sk := db.zEncodeSizeKey(key)
 
-	size, err := Int64(db.db.Get(sk))
+	size, err := Int64(db.bucket.Get(sk))
 	if err != nil {
 		return 0, err
 	} else {
@@ -329,7 +329,7 @@ func (db *DB) ZCard(key []byte) (int64, error) {
 	}
 
 	sk := db.zEncodeSizeKey(key)
-	return Int64(db.db.Get(sk))
+	return Int64(db.bucket.Get(sk))
 }
 
 func (db *DB) ZScore(key []byte, member []byte) (int64, error) {
@@ -340,7 +340,7 @@ func (db *DB) ZScore(key []byte, member []byte) (int64, error) {
 	var score int64 = InvalidScore
 
 	k := db.zEncodeSetKey(key, member)
-	if v, err := db.db.Get(k); err != nil {
+	if v, err := db.bucket.Get(k); err != nil {
 		return InvalidScore, err
 	} else if v == nil {
 		return InvalidScore, ErrScoreMiss
@@ -358,7 +358,7 @@ func (db *DB) ZRem(key []byte, members ...[]byte) (int64, error) {
 		return 0, nil
 	}
 
-	t := db.zsetTx
+	t := db.zsetBatch
 	t.Lock()
 	defer t.Unlock()
 
@@ -388,14 +388,14 @@ func (db *DB) ZIncrBy(key []byte, delta int64, member []byte) (int64, error) {
 		return InvalidScore, err
 	}
 
-	t := db.zsetTx
+	t := db.zsetBatch
 	t.Lock()
 	defer t.Unlock()
 
 	ek := db.zEncodeSetKey(key, member)
 
 	var oldScore int64 = 0
-	v, err := db.db.Get(ek)
+	v, err := db.bucket.Get(ek)
 	if err != nil {
 		return InvalidScore, err
 	} else if v == nil {
@@ -434,7 +434,7 @@ func (db *DB) ZCount(key []byte, min int64, max int64) (int64, error) {
 
 	rangeType := store.RangeROpen
 
-	it := db.db.RangeLimitIterator(minKey, maxKey, rangeType, 0, -1)
+	it := db.bucket.RangeLimitIterator(minKey, maxKey, rangeType, 0, -1)
 	var n int64 = 0
 	for ; it.Valid(); it.Next() {
 		n++
@@ -451,7 +451,7 @@ func (db *DB) zrank(key []byte, member []byte, reverse bool) (int64, error) {
 
 	k := db.zEncodeSetKey(key, member)
 
-	it := db.db.NewIterator()
+	it := db.bucket.NewIterator()
 	defer it.Close()
 
 	if v := it.Find(k); v == nil {
@@ -497,13 +497,13 @@ func (db *DB) zIterator(key []byte, min int64, max int64, offset int, count int,
 	maxKey := db.zEncodeStopScoreKey(key, max)
 
 	if !reverse {
-		return db.db.RangeLimitIterator(minKey, maxKey, store.RangeClose, offset, count)
+		return db.bucket.RangeLimitIterator(minKey, maxKey, store.RangeClose, offset, count)
 	} else {
-		return db.db.RevRangeLimitIterator(minKey, maxKey, store.RangeClose, offset, count)
+		return db.bucket.RevRangeLimitIterator(minKey, maxKey, store.RangeClose, offset, count)
 	}
 }
 
-func (db *DB) zRemRange(t *tx, key []byte, min int64, max int64, offset int, count int) (int64, error) {
+func (db *DB) zRemRange(t *batch, key []byte, min int64, max int64, offset int, count int) (int64, error) {
 	if len(key) > MaxKeySize {
 		return 0, errKeySize
 	}
@@ -619,7 +619,7 @@ func (db *DB) zParseLimit(key []byte, start int, stop int) (offset int, count in
 }
 
 func (db *DB) ZClear(key []byte) (int64, error) {
-	t := db.zsetTx
+	t := db.zsetBatch
 	t.Lock()
 	defer t.Unlock()
 
@@ -632,7 +632,7 @@ func (db *DB) ZClear(key []byte) (int64, error) {
 }
 
 func (db *DB) ZMclear(keys ...[]byte) (int64, error) {
-	t := db.zsetTx
+	t := db.zsetBatch
 	t.Lock()
 	defer t.Unlock()
 
@@ -670,7 +670,7 @@ func (db *DB) ZRemRangeByRank(key []byte, start int, stop int) (int64, error) {
 
 	var rmCnt int64
 
-	t := db.zsetTx
+	t := db.zsetBatch
 	t.Lock()
 	defer t.Unlock()
 
@@ -684,7 +684,7 @@ func (db *DB) ZRemRangeByRank(key []byte, start int, stop int) (int64, error) {
 
 //min and max must be inclusive
 func (db *DB) ZRemRangeByScore(key []byte, min int64, max int64) (int64, error) {
-	t := db.zsetTx
+	t := db.zsetBatch
 	t.Lock()
 	defer t.Unlock()
 
@@ -728,7 +728,7 @@ func (db *DB) ZRangeByScoreGeneric(key []byte, min int64, max int64,
 }
 
 func (db *DB) zFlush() (drop int64, err error) {
-	t := db.zsetTx
+	t := db.zsetBatch
 	t.Lock()
 	defer t.Unlock()
 
@@ -740,7 +740,7 @@ func (db *DB) zFlush() (drop int64, err error) {
 	maxKey[0] = db.index
 	maxKey[1] = ZScoreType + 1
 
-	it := db.db.RangeLimitIterator(minKey, maxKey, store.RangeROpen, 0, -1)
+	it := db.bucket.RangeLimitIterator(minKey, maxKey, store.RangeROpen, 0, -1)
 	defer it.Close()
 
 	for ; it.Valid(); it.Next() {
@@ -784,7 +784,7 @@ func (db *DB) ZScan(key []byte, member []byte, count int, inclusive bool) ([]Sco
 		rangeType = store.RangeOpen
 	}
 
-	it := db.db.RangeLimitIterator(minKey, maxKey, rangeType, 0, count)
+	it := db.bucket.RangeLimitIterator(minKey, maxKey, rangeType, 0, count)
 	for ; it.Valid(); it.Next() {
 		if _, m, err := db.zDecodeSetKey(it.Key()); err != nil {
 			continue
@@ -827,7 +827,7 @@ func (db *DB) ZPersist(key []byte) (int64, error) {
 		return 0, err
 	}
 
-	t := db.zsetTx
+	t := db.zsetBatch
 	t.Lock()
 	defer t.Unlock()
 

@@ -9,20 +9,6 @@ import (
 	"time"
 )
 
-type DB struct {
-	l *Ledis
-
-	db *store.DB
-
-	index uint8
-
-	kvTx   *tx
-	listTx *tx
-	hashTx *tx
-	zsetTx *tx
-	binTx  *tx
-}
-
 type Ledis struct {
 	sync.Mutex
 
@@ -75,30 +61,12 @@ func Open(cfg *Config) (*Ledis, error) {
 	}
 
 	for i := uint8(0); i < MaxDBNumber; i++ {
-		l.dbs[i] = newDB(l, i)
+		l.dbs[i] = l.newDB(i)
 	}
 
 	l.activeExpireCycle()
 
 	return l, nil
-}
-
-func newDB(l *Ledis, index uint8) *DB {
-	d := new(DB)
-
-	d.l = l
-
-	d.db = l.ldb
-
-	d.index = index
-
-	d.kvTx = newTx(l)
-	d.listTx = newTx(l)
-	d.hashTx = newTx(l)
-	d.zsetTx = newTx(l)
-	d.binTx = newTx(l)
-
-	return d
 }
 
 func (l *Ledis) Close() {

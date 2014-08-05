@@ -63,13 +63,13 @@ func (db *DB) incr(key []byte, delta int64) (int64, error) {
 	var err error
 	key = db.encodeKVKey(key)
 
-	t := db.kvTx
+	t := db.kvBatch
 
 	t.Lock()
 	defer t.Unlock()
 
 	var n int64
-	n, err = StrInt64(db.db.Get(key))
+	n, err = StrInt64(db.bucket.Get(key))
 	if err != nil {
 		return 0, err
 	}
@@ -86,14 +86,14 @@ func (db *DB) incr(key []byte, delta int64) (int64, error) {
 
 //	ps : here just focus on deleting the key-value data,
 //		 any other likes expire is ignore.
-func (db *DB) delete(t *tx, key []byte) int64 {
+func (db *DB) delete(t *batch, key []byte) int64 {
 	key = db.encodeKVKey(key)
 	t.Delete(key)
 	return 1
 }
 
 func (db *DB) setExpireAt(key []byte, when int64) (int64, error) {
-	t := db.kvTx
+	t := db.kvBatch
 	t.Lock()
 	defer t.Unlock()
 
@@ -126,7 +126,7 @@ func (db *DB) Del(keys ...[]byte) (int64, error) {
 		codedKeys[i] = db.encodeKVKey(k)
 	}
 
-	t := db.kvTx
+	t := db.kvBatch
 	t.Lock()
 	defer t.Unlock()
 
@@ -148,7 +148,7 @@ func (db *DB) Exists(key []byte) (int64, error) {
 	key = db.encodeKVKey(key)
 
 	var v []byte
-	v, err = db.db.Get(key)
+	v, err = db.bucket.Get(key)
 	if v != nil && err == nil {
 		return 1, nil
 	}
@@ -163,7 +163,7 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 
 	key = db.encodeKVKey(key)
 
-	return db.db.Get(key)
+	return db.bucket.Get(key)
 }
 
 func (db *DB) GetSet(key []byte, value []byte) ([]byte, error) {
@@ -175,12 +175,12 @@ func (db *DB) GetSet(key []byte, value []byte) ([]byte, error) {
 
 	key = db.encodeKVKey(key)
 
-	t := db.kvTx
+	t := db.kvBatch
 
 	t.Lock()
 	defer t.Unlock()
 
-	oldValue, err := db.db.Get(key)
+	oldValue, err := db.bucket.Get(key)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +204,7 @@ func (db *DB) IncrBy(key []byte, increment int64) (int64, error) {
 func (db *DB) MGet(keys ...[]byte) ([][]byte, error) {
 	values := make([][]byte, len(keys))
 
-	it := db.db.NewIterator()
+	it := db.bucket.NewIterator()
 	defer it.Close()
 
 	for i := range keys {
@@ -223,7 +223,7 @@ func (db *DB) MSet(args ...KVPair) error {
 		return nil
 	}
 
-	t := db.kvTx
+	t := db.kvBatch
 
 	var err error
 	var key []byte
@@ -262,7 +262,7 @@ func (db *DB) Set(key []byte, value []byte) error {
 	var err error
 	key = db.encodeKVKey(key)
 
-	t := db.kvTx
+	t := db.kvBatch
 
 	t.Lock()
 	defer t.Unlock()
@@ -288,12 +288,12 @@ func (db *DB) SetNX(key []byte, value []byte) (int64, error) {
 
 	var n int64 = 1
 
-	t := db.kvTx
+	t := db.kvBatch
 
 	t.Lock()
 	defer t.Unlock()
 
-	if v, err := db.db.Get(key); err != nil {
+	if v, err := db.bucket.Get(key); err != nil {
 		return 0, err
 	} else if v != nil {
 		n = 0
@@ -312,7 +312,7 @@ func (db *DB) flush() (drop int64, err error) {
 	minKey := db.encodeKVMinKey()
 	maxKey := db.encodeKVMaxKey()
 
-	t := db.kvTx
+	t := db.kvBatch
 	t.Lock()
 	defer t.Unlock()
 
@@ -348,7 +348,7 @@ func (db *DB) Scan(key []byte, count int, inclusive bool) ([]KVPair, error) {
 		rangeType = store.RangeOpen
 	}
 
-	it := db.db.RangeLimitIterator(minKey, maxKey, rangeType, 0, count)
+	it := db.bucket.RangeLimitIterator(minKey, maxKey, rangeType, 0, count)
 	for ; it.Valid(); it.Next() {
 		if key, err := db.decodeKVKey(it.Key()); err != nil {
 			continue
@@ -390,7 +390,7 @@ func (db *DB) Persist(key []byte) (int64, error) {
 		return 0, err
 	}
 
-	t := db.kvTx
+	t := db.kvBatch
 	t.Lock()
 	defer t.Unlock()
 	n, err := db.rmExpire(t, KVType, key)
