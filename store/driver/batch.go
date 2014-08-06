@@ -35,5 +35,5 @@ func (w *WriteBatch) Rollback() error {
 }
 
 func NewWriteBatch(puter BatchPuter) IWriteBatch {
-	return &WriteBatch{puter, []Write{}}
+	return &WriteBatch{batch: puter, wb: []Write{}}
 }

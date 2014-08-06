@@ -18,7 +18,7 @@ type batch struct {
 }
 
 type dbBatchLocker struct {
-	m      sync.Mutex
+	sync.Mutex
 	dbLock *sync.RWMutex
 }
 
@@ -26,20 +26,18 @@ type dbTxLocker struct {
 }
 
 func (l *dbTxLocker) Lock() {
-
 }
 
 func (l *dbTxLocker) Unlock() {
-
 }
 
 func (l *dbBatchLocker) Lock() {
 	l.dbLock.RLock()
-	l.m.Lock()
+	l.Mutex.Lock()
 }
 
 func (l *dbBatchLocker) Unlock() {
-	l.m.Unlock()
+	l.Mutex.Unlock()
 	l.dbLock.RUnlock()
 }
 
@@ -47,7 +45,7 @@ func (db *DB) newBatch() *batch {
 	b := new(batch)
 
 	b.WriteBatch = db.bucket.NewWriteBatch()
-	b.Locker = &dbBatchLocker{dbLock: &db.dbLock}
+	b.Locker = &dbBatchLocker{dbLock: db.dbLock}
 
 	return b
 }
@@ -81,7 +79,7 @@ func (db *DB) Begin() (*Tx, error) {
 	}
 
 	tx := new(Tx)
-	tx.m = &db.dbLock
+	tx.m = db.dbLock
 
 	tx.m.Lock()
 
@@ -104,8 +102,9 @@ func (db *DB) Begin() (*Tx, error) {
 	d.index = db.index
 
 	b := new(batch)
-	b.WriteBatch = db.bucket.NewWriteBatch()
+	b.WriteBatch = d.bucket.NewWriteBatch()
 	b.Locker = &dbTxLocker{}
+
 	d.kvBatch = b
 	d.listBatch = b
 	d.hashBatch = b

@@ -28,7 +28,7 @@ type DB struct {
 
 	bucket ibucket
 
-	dbLock sync.RWMutex
+	dbLock *sync.RWMutex
 
 	index uint8
 
@@ -51,8 +51,8 @@ func (l *Ledis) newDB(index uint8) *DB {
 	d.bucket = d.sdb
 
 	d.isTx = false
-
 	d.index = index
+	d.dbLock = &sync.RWMutex{}
 
 	d.kvBatch = d.newBatch()
 	d.listBatch = d.newBatch()
