@@ -22,13 +22,13 @@ type dbBatchLocker struct {
 	dbLock *sync.RWMutex
 }
 
-type dbTxLocker struct {
+type txBatchLocker struct {
 }
 
-func (l *dbTxLocker) Lock() {
+func (l *txBatchLocker) Lock() {
 }
 
-func (l *dbTxLocker) Unlock() {
+func (l *txBatchLocker) Unlock() {
 }
 
 func (l *dbBatchLocker) Lock() {
@@ -103,7 +103,7 @@ func (db *DB) Begin() (*Tx, error) {
 
 	b := new(batch)
 	b.WriteBatch = d.bucket.NewWriteBatch()
-	b.Locker = &dbTxLocker{}
+	b.Locker = &txBatchLocker{}
 
 	d.kvBatch = b
 	d.listBatch = b
