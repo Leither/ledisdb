@@ -41,6 +41,18 @@ func testTxRollback(t *testing.T, db *DB) {
 		t.Fatal(err)
 	}
 
+	if v, err := tx.Get(key1); err != nil {
+		t.Fatal(err)
+	} else if string(v) != "1" {
+		t.Fatal(string(v))
+	}
+
+	if v, err := tx.HGet(key2, field2); err != nil {
+		t.Fatal(err)
+	} else if string(v) != "2" {
+		t.Fatal(string(v))
+	}
+
 	err = tx.Rollback()
 	if err != nil {
 		t.Fatal(err)
@@ -95,6 +107,18 @@ func testTxCommit(t *testing.T, db *DB) {
 		t.Fatal(err)
 	}
 
+	if v, err := tx.Get(key1); err != nil {
+		t.Fatal(err)
+	} else if string(v) != "1" {
+		t.Fatal(string(v))
+	}
+
+	if v, err := tx.HGet(key2, field2); err != nil {
+		t.Fatal(err)
+	} else if string(v) != "2" {
+		t.Fatal(string(v))
+	}
+
 	err = tx.Commit()
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +135,6 @@ func testTxCommit(t *testing.T, db *DB) {
 	} else if string(v) != "2" {
 		t.Fatal(string(v))
 	}
-
 }
 
 func testTx(t *testing.T, name string) {
