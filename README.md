@@ -2,7 +2,7 @@
 
 Ledisdb is a high performance NoSQL like Redis written by go. It supports some advanced data structure like kv, list, hash, zset, bitmap, and may be alternative for Redis.
 
-LedisDB now supports multi database as backend to store data, you can test and choose the proper one for you.
+LedisDB now supports multi databases as backend to store data, you can test and choose the proper one for you.
 
 ## Features
 
@@ -11,9 +11,9 @@ LedisDB now supports multi database as backend to store data, you can test and c
 + Various backend database to use: LevelDB, goleveldb, LMDB, RocksDB, BoltDB.  
 + Supports expiration and ttl.
 + Redis clients, like redis-cli, are supported directly.
-+ Multi client API supports, including Golang, Python, Lua(Openresty). 
-+ Easy to embed in Golang application. 
-+ Restful API support.
++ Multi client API supports, including Go, Python, Lua(Openresty). 
++ Easy to embed in your own Go application. 
++ Restful API support, json/bson/msgpack output.
 + Replication to guarantee data safe.
 + Supplies tools to load, dump, repair database. 
 
@@ -60,19 +60,17 @@ Create a workspace and checkout ledisdb source
 
 ## Choose store database
 
-LedisDB now supports goleveldb, lmdb, leveldb, rocksdb, it will choose goleveldb as default to store data if you not set.
+LedisDB now supports goleveldb, lmdb, leveldb, rocksdb, boltdb, it will choose goleveldb as default to store data if you not set.
 
 Choosing a store database to use is very simple, you have two ways:
 
 + Set in server config file
 
-        "db" : {
-            "name" : "leveldb"
-        }
+        db_name = "leveldb"
 
 + Set in command flag
 
-        ledis-server -config=/etc/ledis.json -db_name=leveldb
+        ledis-server -config=/etc/ledis.toml -db_name=leveldb
 
     Flag command set will overwrite config set.
 
@@ -85,7 +83,7 @@ You must known that changing store database runtime is very dangerous, LedisDB w
     //set run environment if not
     source dev.sh
 
-    ledis-server -config=/etc/ledis.json
+    ledis-server -config=/etc/ledis.toml
 
     //another shell
     ledis-cli -p 6380
