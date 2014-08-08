@@ -39,15 +39,14 @@ func selectCommand(req *requestContext) error {
 		return ErrCmdParams
 	}
 
-	if index, err := strconv.Atoi(ledis.String(req.args[0])); err != nil {
+	var indx int
+	if index, err = strconv.Atoi(ledis.String(req.args[0])); err != nil {
 		return err
-	} else {
-		if db, err := req.ldb.Select(index); err != nil {
-			return err
-		} else {
-			req.db = db
-			req.resp.writeStatus(OK)
-		}
+	}
+
+	if db, err = req.ldb.Select(index); err == nil {
+		req.cliCtx.db = db
+		req.resp.writeStatus(OK)
 	}
 	return nil
 }

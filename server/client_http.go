@@ -28,11 +28,12 @@ var unsopportedCommands = map[string]struct{}{
 
 type httpClient struct {
 	app *App
-	db  *ledis.DB
 	ldb *ledis.Ledis
 
 	resp responseWriter
 	req  *requestContext
+
+	ctx *clientContext
 }
 
 type httpWriter struct {
@@ -43,21 +44,22 @@ type httpWriter struct {
 
 func newClientHTTP(app *App, w http.ResponseWriter, r *http.Request) {
 	var err error
+
 	c := new(httpClient)
 	c.app = app
-	c.ldb = app.ldb
-	c.db, err = c.ldb.Select(0)
-	if err != nil {
-		w.Write([]byte(err.Error()))
-		return
-	}
+	c.ctx = newClientContext(app)
 
 	c.req, err = c.makeRequest(app, r, w)
 	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
-	c.req.perform()
+
+	app.postClientRequest(c, req)
+}
+
+func (c *httpClient) close() {
+	return
 }
 
 func (c *httpClient) addr(r *http.Request) string {
@@ -69,29 +71,29 @@ func (c *httpClient) makeRequest(app *App, r *http.Request, w http.ResponseWrite
 
 	db, cmd, argsStr, contentType := c.parseReqPath(r)
 
-	c.db, err = app.ldb.Select(db)
+	c.ctx.db, err = app.ldb.Select(db)
 	if err != nil {
 		return nil, err
 	}
 
 	contentType = strings.ToLower(contentType)
-
 	if _, ok := allowedContentTypes[contentType]; !ok {
 		return nil, fmt.Errorf("unsupported content type: '%s', only json, bson, msgpack are supported", contentType)
 	}
 
 	req := newRequestContext(app)
-	args := make([][]byte, len(argsStr))
-	for i, arg := range argsStr {
-		args[i] = []byte(arg)
-	}
+	req.appCtx = app.ctx
+	req.cliCtx = c.ctx
 
 	req.cmd = strings.ToLower(cmd)
 	if _, ok := unsopportedCommands[req.cmd]; ok {
 		return nil, fmt.Errorf("unsupported command: '%s'", cmd)
 	}
 
-	req.args = args
+	req.args = make([][]byte, len(argsStr))
+	for i, arg := range argsStr {
+		req.args[i] = []byte(arg)
+	}
 
 	req.remoteAddr = c.addr(r)
 	req.resp = &httpWriter{contentType, cmd, w}

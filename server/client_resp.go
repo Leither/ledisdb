@@ -16,12 +16,13 @@ var errReadRequest = errors.New("invalid request protocol")
 
 type respClient struct {
 	app *App
-	ldb *ledis.Ledis
-	db  *ledis.DB
+	//ldb *ledis.Ledis
+	//db  *ledis.DB
 
 	conn net.Conn
 	rb   *bufio.Reader
 
+	ctx *clientContext
 	req *requestContext
 }
 
@@ -34,16 +35,21 @@ func newClientRESP(conn net.Conn, app *App) {
 
 	c.app = app
 	c.conn = conn
-	c.ldb = app.ldb
-	c.db, _ = app.ldb.Select(0)
+
+	c.ctx = newClientContext(app)
 
 	c.rb = bufio.NewReaderSize(conn, 256)
 
-	c.req = newRequestContext(app)
-	c.req.resp = newWriterRESP(conn)
-	c.req.remoteAddr = conn.RemoteAddr().String()
+	c.req = c.newRequest()
 
 	go c.run()
+}
+
+func (c *respClient) close() {
+	c.conn.Close()
+	c.conn = nil
+	c.ctx = nil
+	c.req = nil
 }
 
 func (c *respClient) run() {
@@ -128,30 +134,29 @@ func (c *respClient) readRequest() ([][]byte, error) {
 	return req, nil
 }
 
+func (c *respClient) newRequest() *requestContext {
+	req := newRequestContext(c.app)
+
+	req.cliCtx = c.ctx
+	req.appCtx = c.app.ctx
+	req.resp = newWriterRESP(c.conn)
+	req.remoteAddr = c.conn.RemoteAddr().String()
+
+	return req
+}
+
 func (c *respClient) handleRequest(reqData [][]byte) {
 	req := c.req
 
 	if len(reqData) == 0 {
-		c.req.cmd = ""
-		c.req.args = reqData[0:0]
+		req.cmd = ""
+		req.args = reqData[0:0]
 	} else {
-		c.req.cmd = strings.ToLower(ledis.String(reqData[0]))
-		c.req.args = reqData[1:]
-	}
-	if c.req.cmd == "quit" {
-		c.req.resp.writeStatus(OK)
-		c.req.resp.flush()
-		c.conn.Close()
-		return
+		req.cmd = strings.ToLower(ledis.String(reqData[0]))
+		req.args = reqData[1:]
 	}
 
-	req.db = c.db
-
-	c.req.perform()
-
-	c.db = req.db // "SELECT"
-
-	return
+	req.app.postClientRequest(c, req)
 }
 
 //	response writer

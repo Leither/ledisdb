@@ -25,18 +25,21 @@ type requestContext struct {
 	ldb *ledis.Ledis
 	db  *ledis.DB
 
+	tx *ledis.Tx
+
 	remoteAddr string
 	cmd        string
 	args       [][]byte
-
-	resp responseWriter
 
 	syncBuf     bytes.Buffer
 	compressBuf []byte
 
 	reqErr chan error
 
-	buf bytes.Buffer
+	cliCtx *clientContext
+	appCtx *appContext
+
+	resp responseWriter
 }
 
 func newRequestContext(app *App) *requestContext {
@@ -52,7 +55,58 @@ func newRequestContext(app *App) *requestContext {
 	return req
 }
 
-func (req *requestContext) perform() {
+// type irequestHandler interface {
+// 	handle(*requestContext)
+// }
+
+type requestHandler struct {
+	app *App
+	buf bytes.Buffer
+	res chan error
+}
+
+type asyncRequestHandler struct {
+	requestHandler
+	reqs chan *requestContext
+}
+
+func newReuqestHandler(app *App) *requestHandler {
+	hdl := new(requestHandler)
+	hdl.app = app
+	hdl.res = make(chan error)
+
+	return hdl
+}
+
+func newAsyncRequestHandler(app *App) *asyncRequestHandler {
+	hdl := new(asyncRequestHandler)
+
+	hdl.requestHandler = newReuqestHandler(app) // ??????????????????
+
+	hdl.reqs = make(chan *requestContext, 128)
+
+	go hdl.run()
+	return hdl
+}
+
+func (h *asyncRequestHandler) run() {
+	var req *requestContext
+	var end bool = false
+	for !end {
+		req <- h.reqs
+		if req != nil {
+			h.requestHandler.handle(req)
+			req.reqErr = <-nil // todo ........................
+		}
+	}
+}
+
+func (h *asyncRequestHandler) handle(req *requestContext) {
+	h.reqs <- req
+	res := <-req.reqErr
+}
+
+func (h *requestHandler) handle(req *requestContext) {
 	var err error
 
 	start := time.Now()
@@ -62,17 +116,18 @@ func (req *requestContext) perform() {
 	} else if exeCmd, ok := regCmds[req.cmd]; !ok {
 		err = ErrNotFound
 	} else {
-		go func() {
-			req.reqErr <- exeCmd(req)
-		}()
+		req.db = req.cliCtx.db
 
-		err = <-req.reqErr
+		go func() {
+			h.res <- exeCmd(req)
+		}()
+		err = <-h.res
 	}
 
 	duration := time.Since(start)
 
-	if req.app.access != nil {
-		fullCmd := req.catGenericCommand()
+	if hdl.app.access != nil {
+		fullCmd := hdl.catGenericCommand()
 		cost := duration.Nanoseconds() / 1000000
 
 		truncateLen := len(fullCmd)
@@ -80,7 +135,7 @@ func (req *requestContext) perform() {
 			truncateLen = 256
 		}
 
-		req.app.access.Log(req.remoteAddr, cost, fullCmd[:truncateLen], err)
+		hdl.app.access.Log(req.remoteAddr, cost, fullCmd[:truncateLen], err)
 	}
 
 	if err != nil {
@@ -101,8 +156,8 @@ func (req *requestContext) perform() {
 // 	return h.catGenericCommand(req)
 // }
 
-func (req *requestContext) catGenericCommand() []byte {
-	buffer := req.buf
+func (h *requestHandler) catGenericCommand() []byte {
+	buffer := h.buf
 	buffer.Reset()
 
 	buffer.Write([]byte(req.cmd))

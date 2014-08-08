@@ -25,6 +25,13 @@ type App struct {
 
 	//for slave replication
 	m *master
+
+	dispatcher *dispatch
+	ctx        *appContext
+}
+
+type appContext struct {
+	app *App
 }
 
 func netType(s string) string {
@@ -33,6 +40,12 @@ func netType(s string) string {
 	} else {
 		return "tcp"
 	}
+}
+
+func newAppContext(app *App) *appContext {
+	ctx := new(appContext)
+	ctx.app = app
+	return ctx
 }
 
 func NewApp(cfg *config.Config) (*App, error) {
@@ -78,6 +91,10 @@ func NewApp(cfg *config.Config) (*App, error) {
 	}
 
 	app.m = newMaster(app)
+
+	app.dispatcher = newDispatcher(app)
+
+	app.ctx = newAppContext(app)
 
 	return app, nil
 }
@@ -140,4 +157,8 @@ func (app *App) httpServe() {
 
 func (app *App) Ledis() *ledis.Ledis {
 	return app.ldb
+}
+
+func (app *App) postClientRequest(c client, req *requestContext) {
+	app.dispatcher.postClientRequest(c, req)
 }
