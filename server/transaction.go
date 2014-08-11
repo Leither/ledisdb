@@ -38,13 +38,15 @@ func newTransactionHandler(app *App) *transactionHandler {
 	return hdl
 }
 
-func (hdl *transactionHandler) handle(req *requestContext) error {
+func (hdl *transactionHandler) handle(req *requestContext) {
 	if _, ok := txUnsopportedCommands[req.cmd]; ok {
-		return errTxInvalidOperation
+		req.resp.writeError(errTxInvalidOperation)
+		req.resp.flush()
+		return
 	}
 
 	hdl.worker.handle(req)
-	return nil
+	return
 }
 
 func txReject(name string) {
@@ -58,5 +60,4 @@ func init() {
 	txReject("slaveof")
 	txReject("fullsync")
 	txReject("sync")
-	txReject("quit")
 }

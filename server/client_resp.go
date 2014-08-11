@@ -46,10 +46,16 @@ func newClientRESP(conn net.Conn, app *App) {
 }
 
 func (c *respClient) close() error {
+	if c.ctx != nil {
+		c.ctx.release()
+		c.ctx = nil
+	}
+
+	c.req = nil
+
 	c.conn.Close()
 	c.conn = nil
-	c.ctx = nil
-	c.req = nil
+
 	return nil
 }
 

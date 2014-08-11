@@ -31,16 +31,16 @@ func (disp *dispatch) initWHandlers(app *App) {
 
 func (disp *dispatch) postClientRequest(c client, req *requestContext) {
 
-	txCtx := req.cliCtx.txCtx
-	if txCtx != nil {
-		txCtx.hdl.handle(req)
-		return
-	}
-
 	if req.cmd == "quit" {
 		req.resp.writeStatus(OK)
 		req.resp.flush()
 		c.close()
+		return
+	}
+
+	txCtx := req.cliCtx.txCtx
+	if txCtx != nil {
+		txCtx.hdl.handle(req)
 		return
 	}
 

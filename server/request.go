@@ -142,8 +142,7 @@ type asyncRequestHandler struct {
 func newAsyncRequestHandler(app *App) *asyncRequestHandler {
 	hdl := new(asyncRequestHandler)
 
-	hdl.requestHandler = newReuqestHandler(app) // ??????????????????
-
+	hdl.requestHandler = newReuqestHandler(app)
 	hdl.reqs = make(chan *requestContext, 32)
 
 	go hdl.run()
