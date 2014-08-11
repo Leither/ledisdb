@@ -29,7 +29,7 @@ func newTransactionContext(app *App, tx *ledis.Tx) *transactionContext {
 }
 
 func (ctx *transactionContext) release() {
-	//	todo ......
+	ctx.tx.Rollback()
 }
 
 func newTransactionHandler(app *App) *transactionHandler {

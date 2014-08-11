@@ -16,11 +16,10 @@ var errReadRequest = errors.New("invalid request protocol")
 
 type respClient struct {
 	app *App
-	//ldb *ledis.Ledis
-	//db  *ledis.DB
 
 	conn net.Conn
-	rb   *bufio.Reader
+
+	rb *bufio.Reader
 
 	ctx *clientContext
 	req *requestContext
@@ -46,17 +45,22 @@ func newClientRESP(conn net.Conn, app *App) {
 }
 
 func (c *respClient) close() error {
+	//	ps : async because the call here trace from c.run()
+	go func() {
+		c.conn.Close()
+	}()
+
+	return nil
+}
+
+func (c *respClient) invalid() {
 	if c.ctx != nil {
 		c.ctx.release()
 		c.ctx = nil
 	}
 
 	c.req = nil
-
-	c.conn.Close()
 	c.conn = nil
-
-	return nil
 }
 
 func (c *respClient) context() *clientContext {
@@ -73,17 +77,21 @@ func (c *respClient) run() {
 			log.Fatal("client run panic %s:%v", buf, e)
 		}
 
-		c.conn.Close()
+		if c.conn != nil {
+			c.conn.Close()
+		}
 	}()
 
 	for {
 		reqData, err := c.readRequest()
 		if err != nil {
-			return
+			break
 		}
 
 		c.handleRequest(reqData)
 	}
+
+	c.invalid()
 }
 
 func (c *respClient) readLine() ([]byte, error) {
