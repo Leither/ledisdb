@@ -1,6 +1,7 @@
 package ledis
 
 import (
+	"github.com/siddontang/ledisdb/config"
 	"os"
 	"testing"
 )
@@ -36,6 +37,12 @@ func testTxRollback(t *testing.T, db *DB) {
 	}
 
 	_, err = tx.HSet(key2, field2, []byte("2"))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = tx.HSet([]byte("no_key"), field2, []byte("2"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -138,11 +145,11 @@ func testTxCommit(t *testing.T, db *DB) {
 }
 
 func testTx(t *testing.T, name string) {
-	cfg := new(Config)
+	cfg := new(config.Config)
 	cfg.DataDir = "/tmp/ledis_test_tx"
 
-	cfg.DB.Name = name
-	cfg.DB.MapSize = 10 * 1024 * 1024
+	cfg.DBName = name
+	cfg.LMDB.MapSize = 10 * 1024 * 1024
 
 	os.RemoveAll(cfg.DataDir)
 
