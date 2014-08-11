@@ -16,11 +16,12 @@ type DB struct {
 
 	index uint8
 
-	kvTx   *tx
-	listTx *tx
-	hashTx *tx
-	zsetTx *tx
-	binTx  *tx
+	kvTx     *tx
+	listTx   *tx
+	hashTx   *tx
+	zsetTx   *tx
+	binTx    *tx
+	Keyspace *Keyspace
 }
 
 type Ledis struct {
@@ -98,6 +99,7 @@ func newDB(l *Ledis, index uint8) *DB {
 	d.zsetTx = newTx(l)
 	d.binTx = newTx(l)
 
+	d.Keyspace = &Keyspace{}
 	return d
 }
 

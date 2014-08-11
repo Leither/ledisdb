@@ -47,6 +47,7 @@ func newClientRESP(conn net.Conn, app *App) {
 }
 
 func (c *respClient) run() {
+	c.app.info.addClients(1)
 	defer func() {
 		if e := recover(); e != nil {
 			buf := make([]byte, 4096)
@@ -57,6 +58,7 @@ func (c *respClient) run() {
 		}
 
 		c.conn.Close()
+		c.app.info.addClients(-1)
 	}()
 
 	for {

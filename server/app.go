@@ -24,7 +24,8 @@ type App struct {
 	access *accessLog
 
 	//for slave replication
-	m *master
+	m    *master
+	info *info
 }
 
 func netType(s string) string {
@@ -77,7 +78,7 @@ func NewApp(cfg *Config) (*App, error) {
 	}
 
 	app.m = newMaster(app)
-
+	app.info = newInfo(app)
 	return app, nil
 }
 

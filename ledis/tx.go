@@ -37,6 +37,14 @@ func (t *tx) Put(key []byte, value []byte) {
 		buf := encodeBinLogPut(key, value)
 		t.batch = append(t.batch, buf)
 	}
+	db, err := t.l.Select(int(key[0]))
+	if err != nil {
+		return
+	}
+
+	if val, err := db.db.Get(key); err == nil && val == nil {
+		db.Keyspace.add(key[1], key[2], 1)
+	}
 }
 
 func (t *tx) Delete(key []byte) {
@@ -45,6 +53,15 @@ func (t *tx) Delete(key []byte) {
 	if t.binlog != nil {
 		buf := encodeBinLogDelete(key)
 		t.batch = append(t.batch, buf)
+	}
+
+	db, err := t.l.Select(int(key[0]))
+	if err != nil {
+		return
+	}
+
+	if val, err := db.db.Get(key); err == nil && val != nil {
+		db.Keyspace.add(key[1], key[2], -1)
 	}
 }
 

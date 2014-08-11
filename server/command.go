@@ -52,8 +52,25 @@ func selectCommand(req *requestContext) error {
 	return nil
 }
 
+func infoCommand(req *requestContext) error {
+	if len(req.args) > 1 {
+		return ErrSyntax
+	}
+	var section string
+	if len(req.args) == 1 {
+		section = strings.ToLower(ledis.String(req.args[0]))
+	}
+	if buf, err := req.app.info.dumps(section); err != nil {
+		return err
+	} else {
+		req.resp.writeBulk(buf)
+	}
+	return nil
+}
+
 func init() {
 	register("ping", pingCommand)
 	register("echo", echoCommand)
 	register("select", selectCommand)
+	register("info", infoCommand)
 }
