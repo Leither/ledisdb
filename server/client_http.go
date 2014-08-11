@@ -55,11 +55,15 @@ func newClientHTTP(app *App, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app.postClientRequest(c, req)
+	app.postClientRequest(c, c.req)
 }
 
-func (c *httpClient) close() {
-	return
+func (c *httpClient) close() error {
+	return nil
+}
+
+func (c *httpClient) context() *clientContext {
+	return c.ctx
 }
 
 func (c *httpClient) addr(r *http.Request) string {

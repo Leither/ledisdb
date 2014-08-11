@@ -1,9 +1,7 @@
 package server
 
 import (
-	"fmt"
 	"github.com/siddontang/ledisdb/ledis"
-	"strings"
 )
 
 type dispatch struct {
@@ -11,22 +9,24 @@ type dispatch struct {
 	whandlers []*asyncRequestHandler
 }
 
-func newDispatcher(app *App) {
+func newDispatcher(app *App) *dispatch {
 	disp := new(dispatch)
 	disp.app = app
-	disp.initWHandlers()
+
+	disp.initWHandlers(app)
+
 	return disp
 }
 
-func (disp *dispatch) initWHandlers() {
+func (disp *dispatch) initWHandlers(app *App) {
 	var cnt int = int(ledis.MaxDBNumber)
 
-	disp.whandlers = make([]*asyncRequestHandler, 0, cnt)
-
+	whandlers := make([]*asyncRequestHandler, 0, cnt)
 	for dbNO := 0; dbNO < cnt; dbNO++ {
 		hdl := newAsyncRequestHandler(app)
-		disp.whandlers = append(disp.whandlers, hdl)
+		whandlers = append(whandlers, hdl)
 	}
+	disp.whandlers = whandlers
 }
 
 func (disp *dispatch) postClientRequest(c client, req *requestContext) {
@@ -49,7 +49,7 @@ func (disp *dispatch) postClientRequest(c client, req *requestContext) {
 		hdl.handle(req)
 
 	} else {
-		cliCtx.hdl.handle(req)
+		req.cliCtx.hdl.handle(req)
 	}
 
 	return

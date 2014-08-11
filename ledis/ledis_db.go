@@ -63,6 +63,10 @@ func (l *Ledis) newDB(index uint8) *DB {
 	return d
 }
 
+func (db *DB) Index() int {
+	return int(db.index)
+}
+
 func (db *DB) FlushAll() (drop int64, err error) {
 	all := [...](func() (int64, error)){
 		db.flush,

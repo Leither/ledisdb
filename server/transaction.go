@@ -1,12 +1,12 @@
 package server
 
 import (
-	"error"
+	"errors"
 	"github.com/siddontang/ledisdb/ledis"
 	"strings"
 )
 
-var txUnsopportedCommands = make(map[string]byte)
+var txUnsopportedCommands = map[string]byte{}
 
 var errTxMiss = errors.New("transaction context miss")
 var errTxDuplication = errors.New("duplicate transaction")
@@ -39,11 +39,12 @@ func newTransactionHandler(app *App) *transactionHandler {
 }
 
 func (hdl *transactionHandler) handle(req *requestContext) error {
-	if ok, _ := txUnsopportedCommands[req.cmd]; ok {
+	if _, ok := txUnsopportedCommands[req.cmd]; ok {
 		return errTxInvalidOperation
 	}
 
-	return hdl.worker.handle(req)
+	hdl.worker.handle(req)
+	return nil
 }
 
 func txReject(name string) {
@@ -51,15 +52,11 @@ func txReject(name string) {
 }
 
 func init() {
-	// todo ... like write commands , config in universe ?
-
 	txReject("select")
 	txReject("echo")
 	txReject("ping") // !!!!!!!!!!!!!
-
 	txReject("slaveof")
 	txReject("fullsync")
 	txReject("sync")
-
 	txReject("quit")
 }

@@ -1,7 +1,7 @@
 package server
 
 import (
-	"error"
+	"github.com/siddontang/ledisdb/ledis"
 )
 
 type client interface {
@@ -19,7 +19,7 @@ type clientContext struct {
 func newClientContext(app *App) *clientContext {
 	ctx := new(clientContext)
 	ctx.app = app
-	ctx.db = app.ldb.Select(0)
+	ctx.db, _ = app.ldb.Select(0)
 	ctx.hdl = newReuqestHandler(app)
 	return ctx
 }
@@ -31,7 +31,7 @@ func (ctx *clientContext) beginTransaction(tx *ledis.Tx) error {
 
 	ctx.txCtx = newTransactionContext(ctx.app, tx)
 	ctx.db = tx.DB
-	return
+	return nil
 }
 
 func (ctx *clientContext) endTransaction() error {
@@ -39,11 +39,11 @@ func (ctx *clientContext) endTransaction() error {
 		return errTxMiss
 	}
 
-	ctx.db = app.ldb.Select(ctx.db.Index())
+	ctx.db, _ = ctx.app.ldb.Select(ctx.db.Index())
 	ctx.txCtx.release()
 	ctx.txCtx = nil
 
-	return
+	return nil
 }
 
 func (ctx *clientContext) acquireTx() *ledis.Tx {

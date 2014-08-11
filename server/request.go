@@ -34,7 +34,7 @@ type requestContext struct {
 	syncBuf     bytes.Buffer
 	compressBuf []byte
 
-	reqErr chan error
+	res chan interface{}
 
 	cliCtx *clientContext
 	appCtx *appContext
@@ -50,24 +50,15 @@ func newRequestContext(app *App) *requestContext {
 	req.db, _ = app.ldb.Select(0) //use default db
 
 	req.compressBuf = make([]byte, 256)
-	req.reqErr = make(chan error)
+	req.res = make(chan interface{})
 
 	return req
 }
-
-// type irequestHandler interface {
-// 	handle(*requestContext)
-// }
 
 type requestHandler struct {
 	app *App
 	buf bytes.Buffer
 	res chan error
-}
-
-type asyncRequestHandler struct {
-	requestHandler
-	reqs chan *requestContext
 }
 
 func newReuqestHandler(app *App) *requestHandler {
@@ -76,34 +67,6 @@ func newReuqestHandler(app *App) *requestHandler {
 	hdl.res = make(chan error)
 
 	return hdl
-}
-
-func newAsyncRequestHandler(app *App) *asyncRequestHandler {
-	hdl := new(asyncRequestHandler)
-
-	hdl.requestHandler = newReuqestHandler(app) // ??????????????????
-
-	hdl.reqs = make(chan *requestContext, 128)
-
-	go hdl.run()
-	return hdl
-}
-
-func (h *asyncRequestHandler) run() {
-	var req *requestContext
-	var end bool = false
-	for !end {
-		req <- h.reqs
-		if req != nil {
-			h.requestHandler.handle(req)
-			req.reqErr = <-nil // todo ........................
-		}
-	}
-}
-
-func (h *asyncRequestHandler) handle(req *requestContext) {
-	h.reqs <- req
-	res := <-req.reqErr
 }
 
 func (h *requestHandler) handle(req *requestContext) {
@@ -126,8 +89,8 @@ func (h *requestHandler) handle(req *requestContext) {
 
 	duration := time.Since(start)
 
-	if hdl.app.access != nil {
-		fullCmd := hdl.catGenericCommand()
+	if h.app.access != nil {
+		fullCmd := h.catGenericCommand(req)
 		cost := duration.Nanoseconds() / 1000000
 
 		truncateLen := len(fullCmd)
@@ -135,13 +98,14 @@ func (h *requestHandler) handle(req *requestContext) {
 			truncateLen = 256
 		}
 
-		hdl.app.access.Log(req.remoteAddr, cost, fullCmd[:truncateLen], err)
+		h.app.access.Log(req.remoteAddr, cost, fullCmd[:truncateLen], err)
 	}
 
 	if err != nil {
 		req.resp.writeError(err)
 	}
 	req.resp.flush()
+
 	return
 }
 
@@ -156,7 +120,7 @@ func (h *requestHandler) handle(req *requestContext) {
 // 	return h.catGenericCommand(req)
 // }
 
-func (h *requestHandler) catGenericCommand() []byte {
+func (h *requestHandler) catGenericCommand(req *requestContext) []byte {
 	buffer := h.buf
 	buffer.Reset()
 
@@ -168,4 +132,37 @@ func (h *requestHandler) catGenericCommand() []byte {
 	}
 
 	return buffer.Bytes()
+}
+
+type asyncRequestHandler struct {
+	*requestHandler
+	reqs chan *requestContext
+}
+
+func newAsyncRequestHandler(app *App) *asyncRequestHandler {
+	hdl := new(asyncRequestHandler)
+
+	hdl.requestHandler = newReuqestHandler(app) // ??????????????????
+
+	hdl.reqs = make(chan *requestContext, 32)
+
+	go hdl.run()
+	return hdl
+}
+
+func (h *asyncRequestHandler) run() {
+	var req *requestContext
+	var end bool = false
+	for !end {
+		req = <-h.reqs
+		if req != nil {
+			h.requestHandler.handle(req)
+			req.res <- nil // todo ........................
+		}
+	}
+}
+
+func (h *asyncRequestHandler) handle(req *requestContext) {
+	h.reqs <- req
+	<-req.res
 }

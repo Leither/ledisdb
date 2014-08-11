@@ -1,11 +1,7 @@
 package server
 
 import (
-	"errors"
 	"github.com/siddontang/ledisdb/ledis"
-	"math"
-	"strconv"
-	"strings"
 )
 
 func beginCommand(req *requestContext) error {
@@ -33,7 +29,7 @@ func commitCommand(req *requestContext) error {
 		return err
 	}
 
-	req.cliCtx.exitTransaction()
+	req.cliCtx.endTransaction()
 	req.resp.writeStatus(OK)
 	return nil
 }

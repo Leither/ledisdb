@@ -45,11 +45,16 @@ func newClientRESP(conn net.Conn, app *App) {
 	go c.run()
 }
 
-func (c *respClient) close() {
+func (c *respClient) close() error {
 	c.conn.Close()
 	c.conn = nil
 	c.ctx = nil
 	c.req = nil
+	return nil
+}
+
+func (c *respClient) context() *clientContext {
+	return c.ctx
 }
 
 func (c *respClient) run() {
