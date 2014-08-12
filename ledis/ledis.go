@@ -99,7 +99,6 @@ func newDB(l *Ledis, index uint8) *DB {
 	d.zsetTx = newTx(l)
 	d.binTx = newTx(l)
 
-	d.Keyspace = &Keyspace{}
 	return d
 }
 

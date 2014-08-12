@@ -78,7 +78,9 @@ func NewApp(cfg *Config) (*App, error) {
 	}
 
 	app.m = newMaster(app)
-	app.info = newInfo(app)
+	if app.info, err = newInfo(app); err != nil {
+		return nil, err
+	}
 	return app, nil
 }
 
@@ -102,8 +104,8 @@ func (app *App) Close() {
 	if app.access != nil {
 		app.access.Close()
 	}
-
 	app.ldb.Close()
+	app.info.Close()
 }
 
 func (app *App) Run() {
