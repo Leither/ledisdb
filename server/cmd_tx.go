@@ -1,8 +1,6 @@
 package server
 
-import (
-	"github.com/siddontang/ledisdb/ledis"
-)
+import ()
 
 func beginCommand(req *requestContext) error {
 	tx, err := req.db.Begin()
@@ -10,7 +8,7 @@ func beginCommand(req *requestContext) error {
 		return err
 	}
 
-	if err = req.cliCtx.beginTransaction(tx); err != nil {
+	if err = req.cliCtx.beginTx(tx); err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -20,31 +18,31 @@ func beginCommand(req *requestContext) error {
 }
 
 func commitCommand(req *requestContext) error {
-	var tx *ledis.Tx = req.cliCtx.acquireTx()
-	if tx == nil {
+	ctxTx := req.cliCtx.txCtx
+	if ctxTx == nil || ctxTx.tx == nil {
 		return errTxMiss
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := ctxTx.tx.Commit(); err != nil {
 		return err
 	}
 
-	req.cliCtx.endTransaction()
+	req.cliCtx.endTx()
 	req.resp.writeStatus(OK)
 	return nil
 }
 
 func rollbackCommand(req *requestContext) error {
-	var tx *ledis.Tx = req.cliCtx.acquireTx()
-	if tx == nil {
+	ctxTx := req.cliCtx.txCtx
+	if ctxTx == nil || ctxTx.tx == nil {
 		return errTxMiss
 	}
 
-	if err := tx.Rollback(); err != nil {
+	if err := ctxTx.tx.Rollback(); err != nil {
 		return err
 	}
 
-	req.cliCtx.endTransaction()
+	req.cliCtx.endTx()
 	req.resp.writeStatus(OK)
 	return nil
 }

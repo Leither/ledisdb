@@ -39,8 +39,8 @@ func (disp *dispatch) postClientRequest(c client, req *requestContext) {
 	}
 
 	txCtx := req.cliCtx.txCtx
-	if txCtx != nil {
-		txCtx.hdl.handle(req)
+	if txCtx.isProcessing() || req.cmd == "begin" {
+		txCtx.process(req)
 		return
 	}
 

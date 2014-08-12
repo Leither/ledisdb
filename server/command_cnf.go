@@ -507,4 +507,22 @@ var cnfCmds = []cmdConf{
 		"Hash",
 		false,
 	},
+	{
+		"BEGIN",
+		"-",
+		"Transaction",
+		false,
+	},
+	{
+		"COMMIT",
+		"-",
+		"Transaction",
+		false,
+	},
+	{
+		"ROLLBACK",
+		"-",
+		"Transaction",
+		false,
+	},
 }

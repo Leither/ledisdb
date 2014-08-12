@@ -69,7 +69,7 @@ func newReuqestHandler(app *App) *requestHandler {
 	return hdl
 }
 
-func (h *requestHandler) handle(req *requestContext) {
+func (h *requestHandler) handle(req *requestContext) error {
 	var err error
 
 	start := time.Now()
@@ -106,7 +106,7 @@ func (h *requestHandler) handle(req *requestContext) {
 	}
 	req.resp.flush()
 
-	return
+	return err
 }
 
 // func (h *requestHandler) catFullCommand(req *requestContext) []byte {

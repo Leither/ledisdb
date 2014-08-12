@@ -21,40 +21,33 @@ func newClientContext(app *App) *clientContext {
 	ctx.app = app
 	ctx.db, _ = app.ldb.Select(0)
 	ctx.hdl = newReuqestHandler(app)
+	ctx.txCtx = newTransactionContext(ctx.app)
+
 	return ctx
 }
 
-func (ctx *clientContext) beginTransaction(tx *ledis.Tx) error {
-	if ctx.txCtx != nil {
+func (ctx *clientContext) beginTx(tx *ledis.Tx) error {
+	if ctx.txCtx.isProcessing() {
 		return errTxDuplication
 	}
 
-	ctx.txCtx = newTransactionContext(ctx.app, tx)
+	ctx.txCtx.bind(tx)
 	ctx.db = tx.DB
+
 	return nil
 }
 
-func (ctx *clientContext) endTransaction() error {
-	if ctx.txCtx == nil {
+func (ctx *clientContext) endTx() error {
+	if !ctx.txCtx.isProcessing() {
 		return errTxMiss
 	}
 
 	ctx.db, _ = ctx.app.ldb.Select(ctx.db.Index())
-	ctx.txCtx.release()
-	ctx.txCtx = nil
+	ctx.txCtx.reset()
 
-	return nil
-}
-
-func (ctx *clientContext) acquireTx() *ledis.Tx {
-	if ctx.txCtx != nil {
-		return ctx.txCtx.tx
-	}
 	return nil
 }
 
 func (ctx *clientContext) release() {
-	if ctx.txCtx != nil {
-		ctx.txCtx.release()
-	}
+	ctx.txCtx.reset()
 }

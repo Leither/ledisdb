@@ -13,40 +13,67 @@ var errTxDuplication = errors.New("duplicate transaction")
 var errTxInvalidOperation = errors.New("invalid operation in transaction")
 
 type transactionContext struct {
-	tx  *ledis.Tx
-	hdl *transactionHandler
+	tx   *ledis.Tx
+	hdl  *requestHandler
+	acts []txAction
 }
 
-type transactionHandler struct {
-	worker *requestHandler
+type txAction struct {
+	cmd  string
+	args [][]byte
 }
 
-func newTransactionContext(app *App, tx *ledis.Tx) *transactionContext {
+func newTransactionContext(app *App) *transactionContext {
 	ctx := new(transactionContext)
-	ctx.tx = tx
-	ctx.hdl = newTransactionHandler(app)
+
+	ctx.hdl = newReuqestHandler(app) // off binlog as default
+	ctx.acts = []txAction{}
+
 	return ctx
 }
 
-func (ctx *transactionContext) release() {
-	ctx.tx.Rollback()
+func (ctx *transactionContext) bind(tx *ledis.Tx) {
+	ctx.tx = tx
 }
 
-func newTransactionHandler(app *App) *transactionHandler {
-	hdl := new(transactionHandler)
-	hdl.worker = newReuqestHandler(app)
-	return hdl
+func (ctx *transactionContext) isProcessing() bool {
+	return ctx.tx != nil
 }
 
-func (hdl *transactionHandler) handle(req *requestContext) {
+func (ctx *transactionContext) reset() {
+	ctx.acts = ctx.acts[0:0]
+
+	if ctx.tx != nil {
+		ctx.tx.Rollback()
+		ctx.tx = nil
+	}
+}
+
+func (ctx *transactionContext) process(req *requestContext) error {
 	if _, ok := txUnsopportedCommands[req.cmd]; ok {
 		req.resp.writeError(errTxInvalidOperation)
 		req.resp.flush()
-		return
+		return errTxInvalidOperation
 	}
 
-	hdl.worker.handle(req)
-	return
+	err := ctx.hdl.handle(req)
+
+	if err == nil {
+		switch req.cmd {
+		case "commit":
+			ctx.acts = append(ctx.acts, txAction{"commit", nil})
+			// todo ... flush acts into binlog !
+			ctx.reset()
+		case "rollback":
+			ctx.reset()
+		default:
+			if isWCommand(req.cmd) {
+				ctx.acts = append(ctx.acts, txAction{req.cmd, req.args})
+			}
+		}
+	}
+
+	return err
 }
 
 func txReject(name string) {
