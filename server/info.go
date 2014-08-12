@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/siddontang/ledisdb/ledis"
+	"github.com/siddontang/ledisdb/store"
 	"os"
 	"runtime"
 	"sync"
@@ -14,12 +15,11 @@ import (
 type info struct {
 	sync.Mutex
 	Server struct {
-		OS         string `json:"os"`
-		ProceessId int    `json:"process_id"`
-		RespAddr   string `json:"resp_addr"`
-		HttpAddr   string `json:"http_addr"`
-
-		GoroutineNum int `json:"goroutine_num"`
+		OS           string `json:"os"`
+		ProceessId   int    `json:"process_id"`
+		RespAddr     string `json:"resp_addr"`
+		HttpAddr     string `json:"http_addr"`
+		GoroutineNum int    `json:"goroutine_num"`
 	} `json:"Server"`
 
 	Clients struct {
@@ -37,16 +37,10 @@ type info struct {
 	} `json:"CPU"`
 
 	Persistence struct {
-		StoreBackend    string `json:"store_backend"`
-		Compression     bool   `json:"compression"`
-		BlockSize       int    `json:"block_size"`
-		WriteBufferSize int    `json:"write_buffer_size"`
-		CacheSize       int    `json:"cache_size"`
-		MaxOpenFiles    int    `json:"max_open_files"`
-		MapSize         int    `json:"map_size"`
+		StoreBackend string `json:"store_backend"`
 	} `json:"Persistence"`
 
-	Keyspace map[string]*ledis.Keyspace `json:"Keyspace"`
+	Keyspace []*ledis.Keyspace `json:"Keyspace"`
 }
 
 func newInfo(app *App) *info {
@@ -62,23 +56,20 @@ func newInfo(app *App) *info {
 	i.Memory.MemoryAlloc = 0
 	i.Memory.MemoryAllocHuman = ""
 
-	i.Persistence.StoreBackend = app.cfg.DB.Name
-	i.Persistence.Compression = app.cfg.DB.Compression
-	i.Persistence.BlockSize = app.cfg.DB.BlockSize
-	i.Persistence.WriteBufferSize = app.cfg.DB.WriteBufferSize
-	i.Persistence.CacheSize = app.cfg.DB.CacheSize
-	i.Persistence.MaxOpenFiles = app.cfg.DB.MaxOpenFiles
-	i.Persistence.MapSize = app.cfg.DB.MapSize
+	if app.cfg.DB.Name != "" {
+		i.Persistence.StoreBackend = app.cfg.DB.Name
+	} else {
+		i.Persistence.StoreBackend = store.DefaultStoreName
+	}
 
-	i.Keyspace = make(map[string]*ledis.Keyspace)
+	i.Keyspace = make([]*ledis.Keyspace, ledis.MaxDBNumber)
 	for idx := 0; idx < int(ledis.MaxDBNumber); idx++ {
 		db, err := app.ldb.Select(idx)
 		if err != nil {
 			panic(err)
 			return nil
 		}
-		dbStr := fmt.Sprintf("db%d", idx)
-		i.Keyspace[dbStr] = db.Keyspace
+		i.Keyspace[idx] = db.Keyspace
 	}
 	return i
 }
@@ -89,12 +80,12 @@ func (i *info) addClients(delta int64) {
 
 func (i *info) collectSysInfo() {
 	var rusage syscall.Rusage
-	if err := syscall.Getrusage(i.Server.ProceessId, &rusage); err != nil {
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &rusage); err != nil {
 		return
 	}
 	i.Lock()
-	i.Cpu.UsedCpuSys = rusage.Stime.Sec
-	i.Cpu.UsedCpuUser = rusage.Utime.Sec
+	i.Cpu.UsedCpuSys = rusage.Stime.Usec
+	i.Cpu.UsedCpuUser = rusage.Utime.Usec
 
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
@@ -102,17 +93,19 @@ func (i *info) collectSysInfo() {
 	i.Memory.MemoryAllocHuman = getMemoryHuman(mem.Alloc)
 
 	i.Server.GoroutineNum = runtime.NumGoroutine()
-
 	i.Unlock()
 }
 
 func getMemoryHuman(m uint64) string {
-	if m > 1024*1024*1024 {
-		return fmt.Sprintf("%.2fG", m/1024/1024/1024.0)
-	} else if m > 1024*1024 {
-		return fmt.Sprintf("%.2fM", m/1024/1024.0)
-	} else if m > 1024 {
-		return fmt.Sprintf("%.2fK", m/1024.0)
+	var gb uint64 = 1024 * 1024 * 1024
+	var mb uint64 = 1024 * 1024
+	var kb uint64 = 1024
+	if m > gb {
+		return fmt.Sprintf("%dG", m/gb)
+	} else if m > mb {
+		return fmt.Sprintf("%dM", m/mb)
+	} else if m > kb {
+		return fmt.Sprintf("%dK", m/kb)
 	} else {
 		return fmt.Sprintf("%d", m)
 	}
