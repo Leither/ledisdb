@@ -23,3 +23,9 @@ var (
 	PONG = "PONG"
 	OK   = "OK"
 )
+
+const (
+	GB uint64 = 1024 * 1024 * 1024
+	MB uint64 = 1024 * 1024
+	KB uint64 = 1024
+)

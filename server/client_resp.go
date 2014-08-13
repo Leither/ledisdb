@@ -68,6 +68,7 @@ func (c *respClient) context() *clientContext {
 }
 
 func (c *respClient) run() {
+	c.app.info.addClients(1)
 	defer func() {
 		if e := recover(); e != nil {
 			buf := make([]byte, 4096)
@@ -80,6 +81,7 @@ func (c *respClient) run() {
 		if c.conn != nil {
 			c.conn.Close()
 		}
+		c.app.info.addClients(-1)
 	}()
 
 	for {

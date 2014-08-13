@@ -53,6 +53,21 @@ func selectCommand(req *requestContext) error {
 	return nil
 }
 
+func infoCommand(req *requestContext) error {
+	if len(req.args) > 1 {
+		return ErrSyntax
+	}
+	var section string
+	if len(req.args) == 1 {
+		section = strings.ToLower(ledis.String(req.args[0]))
+	}
+
+	buf := req.app.info.Dump(section)
+	req.resp.writeBulk(buf)
+
+	return nil
+}
+
 func loadWCommands() {
 	for _, cmd := range cnfCmds {
 		if !cmd.readonly {
@@ -72,4 +87,5 @@ func init() {
 	register("ping", pingCommand)
 	register("echo", echoCommand)
 	register("select", selectCommand)
+	register("info", infoCommand)
 }
