@@ -29,7 +29,7 @@ timestamp(bigendian uint32, seconds)|PayloadLen(bigendian uint32)|PayloadData
 type BinLog struct {
 	path string
 
-	cfg *config.BinLogConfig
+	cfg *config.AofConfig
 
 	logFile *os.File
 
@@ -43,7 +43,7 @@ type BinLog struct {
 func NewBinLog(cfg *config.Config) (*BinLog, error) {
 	l := new(BinLog)
 
-	l.cfg = &cfg.BinLog
+	l.cfg = &cfg.AOF
 	l.cfg.Adjust()
 
 	l.path = path.Join(cfg.DataDir, "bin_log")

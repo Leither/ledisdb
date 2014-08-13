@@ -41,15 +41,15 @@ func Open(cfg *config.Config) (*Ledis, error) {
 
 	l.ldb = ldb
 
-	if cfg.BinLog.MaxFileNum > 0 && cfg.BinLog.MaxFileSize > 0 {
-		println("binlog will be refactored later, use your own risk!!!")
-		l.binlog, err = NewBinLog(cfg)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		l.binlog = nil
-	}
+	// if cfg.BinLog.MaxFileNum > 0 && cfg.BinLog.MaxFileSize > 0 {
+	// 	println("binlog will be refactored later, use your own risk!!!")
+	// 	l.binlog, err = NewBinLog(cfg)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// } else {
+	// 	l.binlog = nil
+	// }
 
 	for i := uint8(0); i < MaxDBNumber; i++ {
 		l.dbs[i] = l.newDB(i)
@@ -66,10 +66,10 @@ func (l *Ledis) Close() {
 
 	l.ldb.Close()
 
-	if l.binlog != nil {
-		l.binlog.Close()
-		l.binlog = nil
-	}
+	// if l.binlog != nil {
+	// 	l.binlog.Close()
+	// 	l.binlog = nil
+	// }
 }
 
 func (l *Ledis) Select(index int) (*DB, error) {

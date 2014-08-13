@@ -35,7 +35,7 @@ max_open_files = 1024
 [lmdb]
 map_size = 524288000
 
-[binlog]
+[aof]
 max_file_size = 0
 max_file_num = 0
 

@@ -37,7 +37,7 @@ type LMDBConfig struct {
 	MapSize int `toml:"map_size" json:"map_size"`
 }
 
-type BinLogConfig struct {
+type AofConfig struct {
 	MaxFileSize int `toml:"max_file_size" json:"max_file_size"`
 	MaxFileNum  int `toml:"max_file_num" json:"max_file_num"`
 }
@@ -55,7 +55,7 @@ type Config struct {
 
 	LMDB LMDBConfig `toml:"lmdb" json:"lmdb"`
 
-	BinLog BinLogConfig `toml:"binlog" json:"binlog"`
+	AOF AofConfig `toml:"aof" json:"binlog"`
 
 	SlaveOf string `toml:"slaveof" json:"slaveof"`
 
@@ -95,9 +95,9 @@ func NewConfigDefault() *Config {
 
 	cfg.DBName = DefaultDBName
 
-	// disable binlog
-	cfg.BinLog.MaxFileNum = 0
-	cfg.BinLog.MaxFileSize = 0
+	// default to disable binlog
+	cfg.AOF.MaxFileNum = 0
+	cfg.AOF.MaxFileSize = 0
 
 	// disable replication
 	cfg.SlaveOf = ""
@@ -126,7 +126,7 @@ func (cfg *LevelDBConfig) Adjust() {
 	}
 }
 
-func (cfg *BinLogConfig) Adjust() {
+func (cfg *AofConfig) Adjust() {
 	if cfg.MaxFileSize <= 0 {
 		cfg.MaxFileSize = DefaultBinLogFileSize
 	} else if cfg.MaxFileSize > MaxBinLogFileSize {
