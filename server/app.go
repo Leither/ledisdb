@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 )
 
 type App struct {
+	sync.RWMutex
 	cfg *config.Config
 
 	listener     net.Listener
@@ -30,6 +32,7 @@ type App struct {
 	ctx        *appContext
 
 	info *info
+	aof  *Aof
 }
 
 type appContext struct {

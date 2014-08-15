@@ -26,6 +26,19 @@ func newClientContext(app *App) *clientContext {
 	return ctx
 }
 
+func (ctx *clientContext) changeDB(dbNO int) error {
+	if ctx.txCtx.isProcessing() {
+		return errTxInvalidOperation
+	}
+
+	if db, err := ctx.app.ldb.Select(dbNO); err != nil {
+		return err
+	} else {
+		ctx.db = db
+	}
+	return nil
+}
+
 func (ctx *clientContext) beginTx(tx *ledis.Tx) error {
 	if ctx.txCtx.isProcessing() {
 		return errTxDuplication

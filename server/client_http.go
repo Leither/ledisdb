@@ -89,7 +89,6 @@ func (c *httpClient) makeRequest(app *App, r *http.Request, w http.ResponseWrite
 	}
 
 	req := newRequestContext(app)
-	req.appCtx = app.ctx
 	req.cliCtx = c.ctx
 
 	req.cmd = strings.ToLower(cmd)

@@ -159,7 +159,6 @@ func (c *respClient) newRequest() *requestContext {
 	req := newRequestContext(c.app)
 
 	req.cliCtx = c.ctx
-	req.appCtx = c.app.ctx
 	req.resp = newWriterRESP(c.conn)
 	req.remoteAddr = c.conn.RemoteAddr().String()
 

@@ -26,15 +26,15 @@ func checkDataEqual(master *App, slave *App) error {
 	return nil
 }
 
-func TestReplication(t *testing.T) {
+func testReplication(t *testing.T) {
 	data_dir := "/tmp/test_replication"
 	os.RemoveAll(data_dir)
 
 	masterCfg := new(config.Config)
 	masterCfg.DataDir = fmt.Sprintf("%s/master", data_dir)
 	masterCfg.Addr = "127.0.0.1:11182"
-	masterCfg.BinLog.MaxFileSize = 1 * 1024 * 1024
-	masterCfg.BinLog.MaxFileNum = 10
+	masterCfg.AOF.MaxFileSize = 1 * 1024 * 1024
+	masterCfg.AOF.MaxFileNum = 10
 
 	var master *App
 	var slave *App

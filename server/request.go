@@ -37,7 +37,6 @@ type requestContext struct {
 	res chan interface{}
 
 	cliCtx *clientContext
-	appCtx *appContext
 
 	resp responseWriter
 }

@@ -3,347 +3,168 @@ package server
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"github.com/siddontang/go-log/log"
-	"github.com/siddontang/go-snappy/snappy"
+	//"github.com/siddontang/go-log/log"
 	"github.com/siddontang/ledisdb/ledis"
-	"io/ioutil"
-	"net"
+	"io"
 	"os"
-	"path"
-	"strconv"
-	"sync"
-	"time"
 )
 
-var (
-	errConnectMaster = errors.New("connect master error")
-)
+const maxSyncRecords = 64
 
-type MasterInfo struct {
-	Addr         string `json:"addr"`
-	LogFileIndex int64  `json:"log_file_index"`
-	LogPos       int64  `json:"log_pos"`
+/*
+	response for the context on command replay
+*/
+
+type replClient struct {
+	app    *App
+	cliCtx *clientContext
 }
 
-func (m *MasterInfo) Save(filePath string) error {
-	data, err := json.Marshal(m)
-	if err != nil {
-		return err
-	}
-
-	filePathBak := fmt.Sprintf("%s.bak", filePath)
-
-	var fd *os.File
-	fd, err = os.OpenFile(filePathBak, os.O_CREATE|os.O_WRONLY, os.ModePerm)
-	if err != nil {
-		return err
-	}
-
-	if _, err = fd.Write(data); err != nil {
-		fd.Close()
-		return err
-	}
-
-	fd.Close()
-	return os.Rename(filePathBak, filePath)
+func newReplClient(app *App) *replClient {
+	cli := new(replClient)
+	cli.app = app
+	cli.cliCtx = newClientContext(app)
+	return cli
 }
 
-func (m *MasterInfo) Load(filePath string) error {
-	data, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		} else {
-			return err
-		}
+func (cli *replClient) close() error {
+	if cli.cliCtx != nil {
+		cli.cliCtx.release()
+		cli.cliCtx = nil
 	}
-
-	if err = json.Unmarshal(data, m); err != nil {
-		return err
-	}
-
 	return nil
 }
 
-type master struct {
-	sync.Mutex
+func (cli *replClient) context() *clientContext {
+	return cli.cliCtx
+}
 
-	conn net.Conn
-	rb   *bufio.Reader
+func (cli *replClient) writeError(err error)                              {}
+func (cli *replClient) writeStatus(sz string)                             {}
+func (cli *replClient) writeInteger(n int64)                              {}
+func (cli *replClient) writeBulk(sz []byte)                               {}
+func (cli *replClient) writeArray(lst []interface{})                      {}
+func (cli *replClient) writeSliceArray(lst [][]byte)                      {}
+func (cli *replClient) writeFVPairArray(lst []ledis.FVPair)               {}
+func (cli *replClient) writeScorePairArray(lst []ledis.ScorePair, b bool) {}
+func (cli *replClient) writeBulkFrom(n int64, r io.Reader)                {}
+func (cli *replClient) flush()                                            {}
 
+/*
+	replication entry
+*/
+
+type replication struct {
 	app *App
+	m   *master
 
-	quit chan struct{}
-
-	infoName string
-
-	info *MasterInfo
-
-	wg sync.WaitGroup
-
-	syncBuf bytes.Buffer
-
-	compressBuf []byte
+	cli    *replClient
+	replay *requestContext
+	aofRcd *aofRecord
+	aof    *Aof
 }
 
-func newMaster(app *App) *master {
-	m := new(master)
-	m.app = app
+func newReplication(app *App) *replication {
+	repl := new(replication)
+	repl.app = app
+	repl.m = new(master)
 
-	m.infoName = path.Join(m.app.cfg.DataDir, "master.info")
+	repl.cli = newReplClient(app)
+	repl.aofRcd = new(aofRecord)
+	repl.aof = app.aof
 
-	m.quit = make(chan struct{}, 1)
-
-	m.compressBuf = make([]byte, 256)
-
-	m.info = new(MasterInfo)
-
-	//if load error, we will start a fullsync later
-	m.loadInfo()
-
-	return m
+	return repl
 }
 
-func (m *master) Close() {
-	select {
-	case m.quit <- struct{}{}:
-	default:
+func (repl *replication) newReplayRequest(rcd *aofRecord) *requestContext {
+	replay := repl.replay
+	if replay == nil {
+		replay = newRequestContext(repl.app)
+		replay.app = repl.app
+		replay.cliCtx = repl.cli.cliCtx
+		replay.resp = repl.cli
+		replay.remoteAddr = "replication"
+
+		repl.replay = replay
 	}
 
-	if m.conn != nil {
-		m.conn.Close()
-		m.conn = nil
-	}
-
-	m.wg.Wait()
-}
-
-func (m *master) loadInfo() error {
-	return m.info.Load(m.infoName)
-}
-
-func (m *master) saveInfo() error {
-	return m.info.Save(m.infoName)
-}
-
-func (m *master) connect() error {
-	if len(m.info.Addr) == 0 {
-		return fmt.Errorf("no assign master addr")
-	}
-
-	if m.conn != nil {
-		m.conn.Close()
-		m.conn = nil
-	}
-
-	if conn, err := net.Dial("tcp", m.info.Addr); err != nil {
-		return err
-	} else {
-		m.conn = conn
-
-		m.rb = bufio.NewReaderSize(m.conn, 4096)
-	}
-	return nil
-}
-
-func (m *master) resetInfo(addr string) {
-	m.info.Addr = addr
-	m.info.LogFileIndex = 0
-	m.info.LogPos = 0
-}
-
-func (m *master) stopReplication() error {
-	m.Close()
-
-	if err := m.saveInfo(); err != nil {
-		log.Error("save master info error %s", err.Error())
-		return err
-	}
-
-	return nil
-}
-
-func (m *master) startReplication(masterAddr string) error {
-	//stop last replcation, if avaliable
-	m.Close()
-
-	if masterAddr != m.info.Addr {
-		m.resetInfo(masterAddr)
-		if err := m.saveInfo(); err != nil {
-			log.Error("save master info error %s", err.Error())
-			return err
-		}
-	}
-
-	m.quit = make(chan struct{}, 1)
-
-	go m.runReplication()
-	return nil
-}
-
-func (m *master) runReplication() {
-	m.wg.Add(1)
-	defer m.wg.Done()
-
-	for {
-		select {
-		case <-m.quit:
-			return
-		default:
-			if err := m.connect(); err != nil {
-				log.Error("connect master %s error %s, try 2s later", m.info.Addr, err.Error())
-				time.Sleep(2 * time.Second)
-				continue
-			}
-		}
-
-		if m.info.LogFileIndex == 0 {
-			//try a fullsync
-			if err := m.fullSync(); err != nil {
-				log.Warn("full sync error %s", err.Error())
-				return
-			}
-
-			if m.info.LogFileIndex == 0 {
-				//master not support binlog, we cannot sync, so stop replication
-				m.stopReplication()
-				return
-			}
-		}
-
-		for {
-			for {
-				lastIndex := m.info.LogFileIndex
-				lastPos := m.info.LogPos
-				if err := m.sync(); err != nil {
-					log.Warn("sync error %s", err.Error())
-					return
-				}
-
-				if m.info.LogFileIndex == lastIndex && m.info.LogPos == lastPos {
-					//sync no data, wait 1s and retry
-					break
-				}
-			}
-
-			select {
-			case <-m.quit:
-				return
-			case <-time.After(1 * time.Second):
-				break
-			}
-		}
-	}
-
-	return
-}
-
-var (
-	fullSyncCmd   = []byte("*1\r\n$8\r\nfullsync\r\n")               //fullsync
-	syncCmdFormat = "*3\r\n$4\r\nsync\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n" //sync index pos
-)
-
-func (m *master) fullSync() error {
-	if _, err := m.conn.Write(fullSyncCmd); err != nil {
-		return err
-	}
-
-	dumpPath := path.Join(m.app.cfg.DataDir, "master.dump")
-	f, err := os.OpenFile(dumpPath, os.O_CREATE|os.O_WRONLY, os.ModePerm)
-	if err != nil {
-		return err
-	}
-
-	defer os.Remove(dumpPath)
-
-	err = ReadBulkTo(m.rb, f)
-	f.Close()
-	if err != nil {
-		log.Error("read dump data error %s", err.Error())
-		return err
-	}
-
-	if err = m.app.ldb.FlushAll(); err != nil {
-		return err
-	}
-
-	var head *ledis.MasterInfo
-	head, err = m.app.ldb.LoadDumpFile(dumpPath)
-
-	if err != nil {
-		log.Error("load dump file error %s", err.Error())
-		return err
-	}
-
-	m.info.LogFileIndex = head.LogFileIndex
-	m.info.LogPos = head.LogPos
-
-	return m.saveInfo()
-}
-
-func (m *master) sync() error {
-	logIndexStr := strconv.FormatInt(m.info.LogFileIndex, 10)
-	logPosStr := strconv.FormatInt(m.info.LogPos, 10)
-
-	cmd := ledis.Slice(fmt.Sprintf(syncCmdFormat, len(logIndexStr),
-		logIndexStr, len(logPosStr), logPosStr))
-	if _, err := m.conn.Write(cmd); err != nil {
-		return err
-	}
-
-	m.syncBuf.Reset()
-
-	err := ReadBulkTo(m.rb, &m.syncBuf)
-	if err != nil {
-		return err
-	}
-
-	var buf []byte
-	buf, err = snappy.Decode(m.compressBuf, m.syncBuf.Bytes())
-	if err != nil {
-		return err
-	} else if len(buf) > len(m.compressBuf) {
-		m.compressBuf = buf
-	}
-
-	if len(buf) < 16 {
-		return fmt.Errorf("invalid sync data len %d", len(buf))
-	}
-
-	m.info.LogFileIndex = int64(binary.BigEndian.Uint64(buf[0:8]))
-	m.info.LogPos = int64(binary.BigEndian.Uint64(buf[8:16]))
-
-	if m.info.LogFileIndex == 0 {
-		//master now not support binlog, stop replication
-		m.stopReplication()
+	//	set relay db
+	if err := replay.cliCtx.changeDB(rcd.db); err != nil {
 		return nil
-	} else if m.info.LogFileIndex == -1 {
-		//-1 means than binlog index and pos are lost, we must start a full sync instead
-		return m.fullSync()
 	}
 
-	err = m.app.ldb.ReplicateFromData(buf[16:])
+	//	set command
+	elements := bytes.Split(rcd.fullcmd, []byte(" "))
+
+	repl.replay.cmd = ledis.String(elements[0])
+
+	if len(elements) > 1 {
+		repl.replay.args = elements[1:]
+	} else {
+		repl.replay.args = elements[0:0]
+	}
+
+	return repl.replay
+}
+
+func (repl *replication) replicateRecord(ctime uint32, rcd *aofRecord) error {
+	replay := repl.newReplayRequest(rcd)
+	// err := repl.app.postClientRequest(repl.cli, repl.replay)
+	// if err != nil {
+	// 	log.Fatal("replication error %s, skip to next", err.Error())
+	// 	return ErrSkipEvent
+	// }
+
+	repl.app.postClientRequest(repl.cli, replay)
+
+	//	err skip record ??
+
+	return nil
+}
+
+func (repl *replication) ReplicateFromReader(r io.Reader) error {
+	if _, err := AofReadN(r, repl.replicateRecord, -1); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (repl *replication) ReplicateFromData(data []byte) error {
+	rb := bytes.NewReader(data)
+	return repl.ReplicateFromReader(rb)
+}
+
+func (repl *replication) ReplicateFromFile(filePath string) error {
+	f, err := os.Open(filePath)
 	if err != nil {
 		return err
 	}
 
-	return m.saveInfo()
+	rb := bufio.NewReaderSize(f, 4096)
+	err = repl.ReplicateFromReader(rb)
 
+	f.Close()
+
+	return err
 }
 
-func (app *App) slaveof(masterAddr string) error {
-	app.m.Lock()
-	defer app.m.Unlock()
+// func (repl *replication) Read(anchor *aofAnchor, w io.Writer) {
+// 	place := func(ctime uint32, data bytes.Buffer) error {
+// 		if _, err := io.CopyN(w, &data, int64(data.Len())); err != nil {
+// 			return err
+// 		}
 
-	if len(masterAddr) == 0 {
-		return app.m.stopReplication()
-	} else {
-		return app.m.startReplication(masterAddr)
-	}
+// 		if err := repl.aofRcd.setup(data.Bytes()); err != nil {
+// 			return
+// 		}
 
-	return nil
-}
+// 		err := repl.replicateRecord(ctime, rcd)
+// 		if err != nil {
+// 			log.Fatal("replication error %s, skip to next", err.Error())
+// 			return ErrSkipEvent
+// 		}
+// 		return nil
+// 	}
+
+// 	return repl.aof.Read(anchor, maxSyncRecords, place)
+// }

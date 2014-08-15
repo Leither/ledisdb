@@ -74,35 +74,34 @@ func syncCommand(req *requestContext) error {
 		return ErrCmdParams
 	}
 
-	var logIndex int64
-	var logPos int64
 	var err error
-	logIndex, err = ledis.StrInt64(args[0], nil)
+	var anchor *aofAnchor = new(aofAnchor)
+
+	anchor.fileIndex, err = ledis.StrInt64(args[0], nil)
 	if err != nil {
 		return ErrCmdParams
 	}
 
-	logPos, err = ledis.StrInt64(args[1], nil)
+	anchor.fileOffset, err = ledis.StrInt64(args[1], nil)
 	if err != nil {
 		return ErrCmdParams
 	}
 
-	req.syncBuf.Reset()
+	syncBuf := req.syncBuf
+	syncBuf.Reset()
 
 	//reserve space to write master info
-	if _, err := req.syncBuf.Write(reserveInfoSpace); err != nil {
+	if _, err := syncBuf.Write(reserveInfoSpace); err != nil {
 		return err
 	}
 
-	m := &ledis.MasterInfo{logIndex, logPos}
-
-	if _, err := req.app.ldb.ReadEventsTo(m, &req.syncBuf); err != nil {
+	if err := req.app.aof.CopyN(anchor, &syncBuf, maxSyncRecords); err != nil {
 		return err
 	} else {
-		buf := req.syncBuf.Bytes()
+		buf := syncBuf.Bytes()
 
-		binary.BigEndian.PutUint64(buf[0:], uint64(m.LogFileIndex))
-		binary.BigEndian.PutUint64(buf[8:], uint64(m.LogPos))
+		binary.BigEndian.PutUint64(buf[0:], uint64(anchor.fileIndex))
+		binary.BigEndian.PutUint64(buf[8:], uint64(anchor.fileOffset))
 
 		if len(req.compressBuf) < snappy.MaxEncodedLen(len(buf)) {
 			req.compressBuf = make([]byte, snappy.MaxEncodedLen(len(buf)))

@@ -35,7 +35,7 @@ func TestAof(t *testing.T) {
 		t.Fatal(len(fs))
 	}
 
-	if idx := aof.FileIndex(); idx != round+1 {
+	if idx := aof.LogFileIndex(); int(idx) != round {
 		t.Fatal(idx)
 	}
 
@@ -54,11 +54,11 @@ func TestAof(t *testing.T) {
 		t.Fatal(len(fs))
 	}
 
-	if idx := aof.FileIndex(); idx != round+1 {
+	if idx := aof.LogFileIndex(); int(idx) != round+1 {
 		t.Fatal(idx)
 	}
 
-	if logFname2 := aof.LogFileName(); logFname1 != logFname2 {
+	if logFname2 := aof.LogFileName(); logFname1 == logFname2 {
 		t.Fatal(logFname1)
 	}
 }

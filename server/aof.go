@@ -2,10 +2,13 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"github.com/siddontang/go-log/log"
 	"github.com/siddontang/ledisdb/config"
+	"io"
 	"io/ioutil"
 	"os"
 	"path"
@@ -25,18 +28,65 @@ log file format:
 
 */
 
+var (
+	ErrSkipRecord = errors.New("skip to next record")
+)
+
+var (
+	errInvalidAofRecord = errors.New("invalid aof record")
+)
+
+type placeRecord func(uint32, *aofRecord) error
+
+type aofRecord struct {
+	db      int
+	fullcmd []byte
+}
+
+func (rcd *aofRecord) extract() []byte {
+	cmdLen := 0
+	if rcd.fullcmd == nil {
+		cmdLen = len(rcd.fullcmd)
+	}
+
+	if cmdLen == 0 {
+		return nil
+	}
+
+	sz := make([]byte, 3+cmdLen)
+	sz[0] = uint8(rcd.db)
+	copy(sz[1:], rcd.fullcmd)
+
+	return sz
+}
+
+func (rcd *aofRecord) setup(data []byte) error {
+	if len(data) < 3 {
+		return errInvalidAofRecord
+	}
+
+	rcd.db = int(data[0])
+	rcd.fullcmd = data[1:]
+	return nil
+}
+
+type aofAnchor struct {
+	fileIndex  int64
+	fileOffset int64
+}
+
 type Aof struct {
 	cfg *config.AofConfig
 
 	path string
 
-	f     *os.File
-	wb    *bufio.Writer
-	fsize int64
+	f  *os.File
+	wb *bufio.Writer
 
-	indexName   string
-	fnames      []string
-	latestIndex int
+	fnames    []string
+	indexName string
+	index     int64
+	fsize     int64
 }
 
 func NewAof(cfg *config.Config) (*Aof, error) {
@@ -55,6 +105,9 @@ func NewAof(cfg *config.Config) (*Aof, error) {
 	if err := aof.loadIndex(); err != nil {
 		return nil, err
 	}
+
+	//	like mysql, if server restart, create a new file
+	aof.openNewFile()
 
 	return aof, nil
 }
@@ -118,9 +171,8 @@ func (aof *Aof) loadIndex() error {
 		return err
 	}
 
-	if fileNum == 0 {
-		aof.latestIndex = 1
-	} else {
+	aof.index = int64(0)
+	if fileNum != 0 {
 		lastFname := aof.fnames[fileNum-1]
 		fileExt := path.Ext(lastFname)[1:]
 
@@ -129,23 +181,19 @@ func (aof *Aof) loadIndex() error {
 			log.Error("invalid aof file name %s", err.Error())
 			return err
 		}
-		aof.latestIndex = int(lastIdx)
-
-		// like mysql, if server restart, a new aof will create
-		aof.latestIndex++
+		aof.index = lastIdx
 	}
 
 	return nil
 }
 
-func (aof *Aof) latestFileName() string {
-	return aof.FormatFileName(aof.latestIndex)
-}
-
 func (aof *Aof) openNewFile() error {
 	var err error
 
-	fname := aof.latestFileName()
+	aof.index++
+	aof.fsize = 0
+
+	fname := aof.FormatFileName(aof.index)
 	fpath := path.Join(aof.path, fname)
 
 	if aof.f, err = os.OpenFile(fpath, os.O_CREATE|os.O_WRONLY, 0666); err != nil {
@@ -153,9 +201,8 @@ func (aof *Aof) openNewFile() error {
 		return err
 	}
 
-	if err = aof.register(fname); err != nil {
-		return err
-	}
+	st, _ := aof.f.Stat()
+	aof.fsize = st.Size()
 
 	if aof.wb == nil {
 		aof.wb = bufio.NewWriterSize(aof.f, 1024)
@@ -163,10 +210,8 @@ func (aof *Aof) openNewFile() error {
 		aof.wb.Reset(aof.f)
 	}
 
-	if st, err := aof.f.Stat(); err != nil {
+	if err = aof.register(fname); err != nil {
 		return err
-	} else {
-		aof.fsize = st.Size()
 	}
 
 	return nil
@@ -203,8 +248,6 @@ func (aof *Aof) purgeFiles(n int) {
 
 func (aof *Aof) checkLogFileSize() bool {
 	if aof.f != nil && aof.fsize >= int64(aof.cfg.MaxFileSize) {
-		aof.latestIndex++
-
 		aof.f.Close()
 		aof.f = nil
 		aof.fsize = 0
@@ -228,7 +271,7 @@ func (aof *Aof) LogNames() []string {
 }
 
 func (aof *Aof) LogFileName() string {
-	return aof.latestFileName()
+	return aof.FormatFileName(aof.index)
 }
 
 func (aof *Aof) LogFilePos() int64 {
@@ -240,15 +283,15 @@ func (aof *Aof) LogFilePos() int64 {
 	}
 }
 
-func (aof *Aof) FileIndex() int {
-	return aof.latestIndex
+func (aof *Aof) LogFileIndex() int64 {
+	return aof.index
 }
 
-func (aof *Aof) FormatFileName(index int) string {
+func (aof *Aof) FormatFileName(index int64) string {
 	return fmt.Sprintf("ledis-aof.%07d", index)
 }
 
-func (aof *Aof) FormatFilePath(index int) string {
+func (aof *Aof) FormatFilePath(index int64) string {
 	return path.Join(aof.path, aof.FormatFileName(index))
 }
 
@@ -260,7 +303,7 @@ func (aof *Aof) Log(args ...[]byte) error {
 	var err error
 
 	if aof.f == nil {
-		if err = aof.openNewFile(); err != nil {
+		if err := aof.openNewFile(); err != nil {
 			return err
 		}
 	}
@@ -296,4 +339,140 @@ func (aof *Aof) Log(args ...[]byte) error {
 	aof.checkLogFileSize()
 
 	return nil
+}
+
+func (aof *Aof) ReadN(anchor *aofAnchor, place placeRecord, limit int) error {
+	filePath := aof.FormatFilePath(anchor.fileIndex)
+	f, err := os.Open(filePath) // todo ... optimize ?
+
+	if err != nil {
+		if os.IsNotExist(err) {
+			anchor.fileIndex = -1
+			anchor.fileOffset = 0
+			err = nil
+		}
+		return err
+	}
+
+	var readed uint32
+	readed, err = AofReadN(f, place, limit)
+
+	if err != nil && err == io.EOF {
+		if anchor.fileIndex < aof.index {
+			anchor.fileIndex++
+			anchor.fileOffset = 0
+		}
+	}
+
+	anchor.fileOffset += int64(readed)
+
+	f.Close()
+
+	return nil
+}
+
+func (aof *Aof) CopyN(anchor *aofAnchor, w io.Writer, limit int) error {
+	filePath := aof.FormatFilePath(anchor.fileIndex)
+	f, err := os.Open(filePath) // todo ... optimize ?
+
+	if err != nil {
+		if os.IsNotExist(err) {
+			anchor.fileIndex = -1
+			anchor.fileOffset = 0
+			err = nil
+		}
+		return err
+	}
+
+	var size uint32
+	size, err = AofCopyN(f, w, limit)
+
+	if err != nil && err == io.EOF {
+		if anchor.fileIndex < aof.index {
+			anchor.fileIndex++
+			anchor.fileOffset = 0
+		}
+	}
+
+	anchor.fileOffset += int64(size)
+
+	f.Close()
+
+	return nil
+}
+
+func AofReadN(r io.Reader, place placeRecord, limit int) (uint32, error) {
+	var createTime uint32
+	var dataLen uint32
+	var dataBuf bytes.Buffer
+	var err error
+
+	var readed uint32
+
+	if limit < 0 {
+		limit = 0xFFFFFFF
+	}
+
+	aofRcd := new(aofRecord)
+
+	for i := 0; i < limit; i++ {
+		if err = binary.Read(r, binary.BigEndian, &createTime); err != nil {
+			return readed, err
+		}
+
+		if err = binary.Read(r, binary.BigEndian, &dataLen); err != nil {
+			return readed, err
+		}
+
+		if _, err = io.CopyN(&dataBuf, r, int64(dataLen)); err != nil {
+			return readed, err
+		}
+
+		if err = aofRcd.setup(dataBuf.Bytes()); err != nil {
+			return readed, ErrSkipRecord
+		}
+
+		err = place(createTime, aofRcd)
+		if err != nil && err != ErrSkipRecord {
+			return readed, err
+		}
+
+		readed += (8 + dataLen)
+
+		dataBuf.Reset()
+	}
+
+	return readed, nil
+}
+
+func AofCopyN(r io.Reader, w io.Writer, limit int) (uint32, error) {
+	var copySize uint32
+	var dataLen uint32
+	var err error
+
+	if limit < 0 {
+		limit = 0xFFFFFFF
+	}
+
+	var ctimeLen int64 = 4
+
+	for i := 0; i < limit; i++ {
+		//	create time
+		if _, err = io.CopyN(w, r, ctimeLen); err != nil {
+			return copySize, err
+		}
+
+		//	data
+		if err = binary.Read(r, binary.BigEndian, &dataLen); err != nil {
+			return copySize, err
+		}
+
+		if _, err = io.CopyN(w, r, int64(dataLen+4)); err != nil {
+			return copySize, err
+		}
+
+		copySize += (8 + dataLen)
+	}
+
+	return copySize, nil
 }
